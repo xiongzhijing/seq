@@ -1,0 +1,14 @@
+# MyBatis 映射配置
+# 由于 mapper XML 打包在 starter jar 内，需指定 classpath 路径
+mybatis:
+  mapper-locations: classpath*:com/ccb/jx/seq/repository/*.xml
+  configuration:
+    # 启用驼峰命名自动映射（补充 resultMap 未覆盖的场景）
+    map-underscore-to-camel-case: true
+
+sequence:
+  datasource:
+    url: jdbc:mysql://localhost:3306/sequence
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: root

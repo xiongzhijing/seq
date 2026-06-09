@@ -1,0 +1,115 @@
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ccb.jx.seq.repository.SequenceRepository">
+
+    <!--
+      SequenceConfig 结果映射。
+      处理数据库下划线命名（snake_case）到 Java 驼峰命名（camelCase）的转换。
+      mode 列使用 EnumTypeHandler 将 VARCHAR 映射为 Mode 枚举。
+    -->
+    <resultMap id="configResultMap"
+               type="com.ccb.jx.seq.model.SequenceConfig">
+        <id     column="seq_name"     property="seqName" />
+        <result column="max_id"       property="maxId" />
+        <result column="step"         property="step" />
+        <result column="increment_by" property="incrementBy" />
+        <result column="min_value"    property="minValue" />
+        <result column="max_value"    property="maxValue" />
+        <result column="cycle"        property="cycle" />
+        <result column="mode"         property="mode"
+                typeHandler="com.ccb.jx.seq.repository.ModeTypeHandler" />
+        <result column="start_with"   property="startWith" />
+        <result column="description"  property="description" />
+        <result column="update_time"  property="updateTime" />
+        <result column="create_time"  property="createTime" />
+    </resultMap>
+
+    <!-- ==================== sequence_config 操作 ==================== -->
+
+    <!-- 查询序列配置（带行锁，用于 STRICT 模式） -->
+    <select id="selectConfigForUpdate"
+            resultMap="configResultMap">
+        SELECT seq_name, max_id, step, increment_by, min_value, max_value,
+               cycle, mode, start_with, description, update_time, create_time
+          FROM sequence_config
+         WHERE seq_name = #{seqName}
+           FOR UPDATE
+    </select>
+
+    <!-- 查询序列配置（普通查询，用于配置缓存加载等无需锁定的场景） -->
+    <select id="selectConfig"
+            resultMap="configResultMap">
+        SELECT seq_name, max_id, step, increment_by, min_value, max_value,
+               cycle, mode, start_with, description, update_time, create_time
+          FROM sequence_config
+         WHERE seq_name = #{seqName}
+    </select>
+
+    <!-- CAS 方式更新 max_id（STRICT 模式 nextVal 使用） -->
+    <update id="updateMaxId">
+        UPDATE sequence_config
+           SET max_id = #{newMaxId}
+         WHERE seq_name = #{seqName}
+           AND max_id = #{oldMaxId}
+    </update>
+
+    <!-- 查询所有序列配置 -->
+    <select id="selectAllConfig"
+            resultMap="configResultMap">
+        SELECT seq_name, max_id, step, increment_by, min_value, max_value,
+               cycle, mode, start_with, description, update_time, create_time
+          FROM sequence_config
+    </select>
+
+    <!-- 插入序列配置（INSERT IGNORE，并发安全） -->
+    <insert id="insertConfigIgnore"
+            parameterType="com.ccb.jx.seq.model.SequenceConfig">
+        INSERT IGNORE INTO sequence_config
+            (seq_name, mode, step, increment_by, min_value, max_value,
+             cycle, start_with, description)
+        VALUES
+            (#{seqName}, #{mode, typeHandler=com.ccb.jx.seq.repository.ModeTypeHandler},
+             #{step}, #{incrementBy}, #{minValue}, #{maxValue},
+             #{cycle}, #{startWith}, #{description})
+    </insert>
+
+    <!-- ==================== sequence_record 操作 ==================== -->
+
+    <!-- 插入号段分配记录 -->
+    <insert id="insertRecord"
+            useGeneratedKeys="true"
+            keyProperty="id"
+            keyColumn="id">
+        INSERT INTO sequence_record (seq_name, start_value, end_value, instance_id,
+                                     status, alloc_time, expire_time)
+        VALUES (#{seqName}, #{startValue}, #{endValue}, #{instanceId},
+                #{status}, #{allocTime}, #{expireTime})
+    </insert>
+
+    <!-- 更新号段记录状态 -->
+    <update id="updateRecordStatus">
+        UPDATE sequence_record
+           SET status = #{status}
+         WHERE id = #{id}
+    </update>
+
+    <!-- 查询指定实例的已分配号段记录（用于审计追踪和崩溃恢复） -->
+    <select id="selectExpiredRecords"
+            resultType="com.ccb.jx.seq.model.SequenceRecord">
+        SELECT id, seq_name, start_value, end_value, instance_id,
+               status, alloc_time, expire_time
+          FROM sequence_record
+         WHERE status = 'ALLOCATED'
+           <if test="instanceId != null">
+           AND instance_id = #{instanceId}
+           </if>
+    </select>
+
+    <!-- 删除指定时间之前的旧号段记录（定期清理，防止表无限增长） -->
+    <delete id="deleteOldRecords">
+        DELETE FROM sequence_record
+         WHERE alloc_time &lt; #{beforeTime}
+           AND status IN ('EXPIRED', 'RECYCLED')
+    </delete>
+
+</mapper>

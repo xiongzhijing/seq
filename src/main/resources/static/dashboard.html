@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>mysql-sequence - 代码统计仪表盘</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { mono: ['JetBrains Mono', 'Consolas', 'monospace'] },
+                    colors: {
+                        surface: { DEFAULT: '#1E293B', light: '#334155', dark: '#0F172A' },
+                        accent: { blue: '#3B82F6', cyan: '#06B6D4', purple: '#8B5CF6', green: '#10B981', amber: '#F59E0B', rose: '#F43F5E' }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 40%, #0F172A 100%);
+            min-height: 100vh;
+            color: #E2E8F0;
+        }
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(148, 163, 184, 0.1);
+            border-radius: 16px;
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(148, 163, 184, 0.08);
+            border-radius: 14px;
+            transition: all 0.3s ease;
+        }
+        .glass-card:hover {
+            border-color: rgba(59, 130, 246, 0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.1);
+        }
+        .stat-value {
+            font-family: 'JetBrains Mono', 'Consolas', monospace;
+            font-variant-numeric: tabular-nums;
+        }
+        .glow-blue { box-shadow: 0 0 20px rgba(59, 130, 246, 0.15); }
+        .glow-cyan { box-shadow: 0 0 20px rgba(6, 182, 212, 0.15); }
+        .glow-purple { box-shadow: 0 0 20px rgba(139, 92, 246, 0.15); }
+        .glow-green { box-shadow: 0 0 20px rgba(16, 185, 129, 0.15); }
+        .chart-container { position: relative; width: 100%; height: 320px; }
+        .chart-container-lg { position: relative; width: 100%; height: 380px; }
+        .progress-bar {
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(148, 163, 184, 0.15);
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        @keyframes countUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-in { animation: countUp 0.6s ease-out forwards; }
+        .stagger-1 { animation-delay: 0.1s; }
+        .stagger-2 { animation-delay: 0.2s; }
+        .stagger-3 { animation-delay: 0.3s; }
+        .stagger-4 { animation-delay: 0.4s; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+        ::-webkit-scrollbar-thumb { background: rgba(59, 130, 246, 0.3); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(59, 130, 246, 0.5); }
+    </style>
+</head>
+<body class="p-4 md:p-6 lg:p-8">
+    <div class="max-w-7xl mx-auto">
+
+        <!-- ========== HEADER ========== -->
+        <header class="mb-8 animate-in">
+            <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
+                <div>
+                    <div class="flex items-center gap-3 mb-2">
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-accent-blue to-accent-cyan flex items-center justify-center">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+                        </div>
+                        <div>
+                            <h1 class="text-2xl md:text-3xl font-bold text-white tracking-tight">mysql-sequence</h1>
+                            <p class="text-sm text-slate-400">Spring Boot Starter · v2.0.0</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="text-sm text-slate-500 font-mono">
+                    生成时间: <span id="genTime">2026-06-06 01:39:09</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- ========== SUMMARY CARDS ========== -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="glass-card p-5 glow-blue animate-in stagger-1">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总代码行数</span>
+                    <div class="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"/></svg>
+                    </div>
+                </div>
+                <div class="stat-value text-3xl md:text-4xl font-bold text-white" id="totalLines">6,184</div>
+                <div class="text-xs text-slate-500 mt-1">46 个源文件</div>
+            </div>
+            <div class="glass-card p-5 glow-cyan animate-in stagger-2">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">主代码</span>
+                    <div class="w-8 h-8 rounded-lg bg-cyan-500/10 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+                    </div>
+                </div>
+                <div class="stat-value text-3xl md:text-4xl font-bold text-cyan-400" id="mainLines">3,295</div>
+                <div class="text-xs text-slate-500 mt-1">27 个文件</div>
+            </div>
+            <div class="glass-card p-5 glow-purple animate-in stagger-3">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">测试代码</span>
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/10 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                </div>
+                <div class="stat-value text-3xl md:text-4xl font-bold text-purple-400" id="testLines">2,889</div>
+                <div class="text-xs text-slate-500 mt-1">19 个文件</div>
+            </div>
+            <div class="glass-card p-5 glow-green animate-in stagger-4">
+                <div class="flex items-center justify-between mb-3">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">测试/主代码比</span>
+                    <div class="w-8 h-8 rounded-lg bg-green-500/10 flex items-center justify-center">
+                        <svg class="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                    </div>
+                </div>
+                <div class="stat-value text-3xl md:text-4xl font-bold text-green-400" id="testRatio">87.7%</div>
+                <div class="progress-bar mt-2">
+                    <div class="progress-fill bg-gradient-to-r from-green-500 to-emerald-400" style="width: 87.7%"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== ROW 1: Module Distribution + Main/Test Comparison ========== -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Module Distribution -->
+            <div class="glass p-6">
+                <h2 class="text-lg font-semibold text-white mb-1">模块代码分布</h2>
+                <p class="text-xs text-slate-500 mb-4">主代码行数按模块统计</p>
+                <div class="chart-container">
+                    <canvas id="moduleChart"></canvas>
+                </div>
+            </div>
+            <!-- Main vs Test Comparison -->
+            <div class="glass p-6">
+                <h2 class="text-lg font-semibold text-white mb-1">主代码 vs 测试代码</h2>
+                <p class="text-xs text-slate-500 mb-4">各模块代码行数对比</p>
+                <div class="chart-container">
+                    <canvas id="comparisonChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== ROW 2: Language Distribution + Top Files Table ========== -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Language Distribution -->
+            <div class="glass p-6">
+                <h2 class="text-lg font-semibold text-white mb-1">语言分布</h2>
+                <p class="text-xs text-slate-500 mb-4">按文件类型统计代码行数</p>
+                <div class="chart-container flex items-center justify-center">
+                    <div style="width: 260px; height: 260px;">
+                        <canvas id="langChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            <!-- Top Files -->
+            <div class="glass p-6 overflow-hidden">
+                <h2 class="text-lg font-semibold text-white mb-1">Top 15 文件</h2>
+                <p class="text-xs text-slate-500 mb-4">按代码行数排名</p>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-xs text-slate-500 uppercase tracking-wider border-b border-slate-700/50">
+                                <th class="pb-3 pr-2 font-medium">#</th>
+                                <th class="pb-3 pr-2 font-medium">文件</th>
+                                <th class="pb-3 pr-2 font-medium">模块</th>
+                                <th class="pb-3 pr-2 font-medium text-right">行数</th>
+                                <th class="pb-3 font-medium text-right">占比</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topFilesBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== ROW 3: Git Timeline + Module Detail ========== -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Git Timeline -->
+            <div class="glass p-6">
+                <h2 class="text-lg font-semibold text-white mb-1">代码增长趋势</h2>
+                <p class="text-xs text-slate-500 mb-4">Git 提交时间线</p>
+                <div class="chart-container-lg">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+            <!-- Module Detail Breakdown -->
+            <div class="glass p-6 overflow-hidden">
+                <h2 class="text-lg font-semibold text-white mb-1">模块详情</h2>
+                <p class="text-xs text-slate-500 mb-4">各模块文件明细</p>
+                <div class="overflow-x-auto max-h-80 overflow-y-auto" id="moduleDetail"></div>
+            </div>
+        </div>
+
+        <!-- ========== FOOTER ========== -->
+        <footer class="text-center text-xs text-slate-600 py-6">
+            mysql-sequence-spring-boot-starter · Code Statistics Dashboard · Generated by automated script
+        </footer>
+    </div>
+
+    <script>
+    // ============================================================
+    // DATA
+    // ============================================================
+    const modules = [
+        { name: 'core',     main: 959, test: 620, mainFiles: 3, testFiles: 3, desc: '序列生成核心逻辑', files: ['CachedSequence.java (440)', 'SequenceService.java (367)', 'StrictSequence.java (152)'] },
+        { name: 'config',   main: 527, test: 67,  mainFiles: 3, testFiles: 1, desc: '自动配置与基础设施', files: ['SequenceAutoConfiguration.java (267)', 'SequenceProperties.java (135)', 'SequenceShutdownHook.java (125)'] },
+        { name: 'buffer',   main: 470, test: 323, mainFiles: 2, testFiles: 2, desc: '双缓冲与号段管理', files: ['DoubleBuffer.java (345)', 'Segment.java (125)'] },
+        { name: 'model',    main: 328, test: 136, mainFiles: 4, testFiles: 1, desc: '数据模型与实体', files: ['SequenceConfig.java (174)', 'SequenceRecord.java (116)', 'Mode.java (22)', 'RecordStatus.java (16)'] },
+        { name: 'controller', main: 293, test: 142, mainFiles: 4, testFiles: 2, desc: 'REST API 控制器', files: ['SequenceController.java (120)', 'SequenceExceptionHandler.java (65)', 'SequenceInfoVO.java (54)', 'SequenceSummaryVO.java (54)'] },
+        { name: 'session',  main: 181, test: 131, mainFiles: 2, testFiles: 2, desc: '会话管理与拦截器', files: ['SessionHolder.java (132)', 'SessionHolderCleanupInterceptor.java (49)'] },
+        { name: 'repository', main: 149, test: 0,   mainFiles: 2, testFiles: 0, desc: '数据访问层', files: ['SequenceRepository.java (106)', 'ModeTypeHandler.java (43)'] },
+        { name: 'exception', main: 127, test: 74,  mainFiles: 2, testFiles: 1, desc: '异常与错误码', files: ['SequenceErrorCode.java (76)', 'SequenceException.java (51)'] },
+        { name: 'integration', main: 0, test: 1256, mainFiles: 0, testFiles: 6, desc: '集成测试', files: ['ConcurrencyStressTest.java (338)', 'SequenceServiceTest.java (251)', 'CachedSequenceIntegrationTest.java (223)', 'StrictSequenceIntegrationTest.java (208)', 'CachedSequenceTest.java (193)', 'SequenceRepositoryIntegrationTest.java (173)'] },
+        { name: 'resources', main: 261, test: 60,  mainFiles: 5, testFiles: 1, desc: '资源与配置文件', files: ['pom.xml (131)', 'SequenceRepository.xml (91)', 'application.yml (13)', 'sequence_config.sql (14)', 'sequence_record.sql (12)', 'init.sql (60)'] }
+    ];
+
+    const langData = [
+        { language: 'Java',    lines: 5863, files: 34, color: '#3B82F6' },
+        { language: 'XML',     lines: 222,  files: 2,  color: '#F59E0B' },
+        { language: 'SQL',     lines: 86,   files: 3,  color: '#10B981' },
+        { language: 'YAML',    lines: 13,   files: 1,  color: '#EC4899' }
+    ];
+
+    const gitTimeline = [
+        { date: '2026-06-05', label: 'Initial commit', added: 13833, deleted: 0, hash: '19f511d' },
+        { date: '2026-06-05', label: '崩溃恢复配置', added: 35, deleted: 9, hash: '50cf15c' },
+        { date: '2026-06-05', label: '崩溃扫描关闭', added: 5, deleted: 6, hash: '2af999f' },
+        { date: '2026-06-05', label: '文档整理', added: 0, deleted: 0, hash: '8ac8246' },
+        { date: '2026-06-06', label: '移除心跳机制', added: 2843, deleted: 4, hash: '33fd5ca' }
+    ];
+
+    const topFiles = [
+        { name: 'CachedSequence.java',               module: 'core',        lines: 440, type: 'Main' },
+        { name: 'SequenceService.java',              module: 'core',        lines: 367, type: 'Main' },
+        { name: 'DoubleBuffer.java',                 module: 'buffer',      lines: 345, type: 'Main' },
+        { name: 'ConcurrencyStressTest.java',        module: 'integration', lines: 338, type: 'Test' },
+        { name: 'SequenceAutoConfiguration.java',    module: 'config',      lines: 267, type: 'Main' },
+        { name: 'SequenceServiceTest.java',          module: 'core',        lines: 251, type: 'Test' },
+        { name: 'CachedSequenceIntegrationTest.java', module: 'integration', lines: 223, type: 'Test' },
+        { name: 'StrictSequenceIntegrationTest.java', module: 'integration', lines: 208, type: 'Test' },
+        { name: 'CachedSequenceTest.java',           module: 'core',        lines: 193, type: 'Test' },
+        { name: 'DoubleBufferTest.java',             module: 'buffer',      lines: 179, type: 'Test' },
+        { name: 'StrictSequenceTest.java',           module: 'core',        lines: 176, type: 'Test' },
+        { name: 'SequenceConfig.java',               module: 'model',       lines: 174, type: 'Main' },
+        { name: 'SequenceRepositoryIntegrationTest.java', module: 'integration', lines: 173, type: 'Test' },
+        { name: 'DiagnosticDuplicateTest.java',      module: 'integration', lines: 166, type: 'Test' },
+        { name: 'StrictSequence.java',               module: 'core',        lines: 152, type: 'Main' }
+    ];
+
+    const totalLines = 6184;
+    const totalMain = 3295;
+    const totalTest = 2889;
+
+    // ============================================================
+    // CHART.JS DARK THEME CONFIG
+    // ============================================================
+    Chart.defaults.color = '#94A3B8';
+    Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.1)';
+    Chart.defaults.font.family = "'Inter', 'system-ui', sans-serif";
+    Chart.defaults.font.size = 12;
+
+    const gridColor = 'rgba(148, 163, 184, 0.06)';
+    const tickColor = '#64748B';
+
+    // ============================================================
+    // 1. MODULE DISTRIBUTION - Horizontal Bar
+    // ============================================================
+    const moduleColors = ['#3B82F6', '#06B6D4', '#8B5CF6', '#10B981', '#F59E0B', '#EC4899', '#6366F1', '#14B8A6', '#F97316', '#84CC16'];
+    const moduleNames = modules.map(m => m.name);
+    const moduleMainLines = modules.map(m => m.main);
+
+    new Chart(document.getElementById('moduleChart'), {
+        type: 'bar',
+        data: {
+            labels: moduleNames,
+            datasets: [{
+                label: '主代码行数',
+                data: moduleMainLines,
+                backgroundColor: moduleNames.map((_, i) => moduleColors[i % moduleColors.length] + '99'),
+                borderColor: moduleNames.map((_, i) => moduleColors[i % moduleColors.length]),
+                borderWidth: 1.5,
+                borderRadius: 6,
+                borderSkipped: false,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleFont: { weight: '600' },
+                    bodyFont: { size: 13 },
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: ctx => ` ${ctx.raw} 行`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { color: gridColor },
+                    ticks: { color: tickColor, callback: v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : v }
+                },
+                y: {
+                    grid: { display: false },
+                    ticks: { color: '#CBD5E1', font: { weight: '500', size: 13 } }
+                }
+            }
+        }
+    });
+
+    // ============================================================
+    // 2. MAIN VS TEST COMPARISON - Grouped Bar
+    // ============================================================
+    new Chart(document.getElementById('comparisonChart'), {
+        type: 'bar',
+        data: {
+            labels: moduleNames,
+            datasets: [
+                {
+                    label: '主代码',
+                    data: modules.map(m => m.main),
+                    backgroundColor: '#3B82F6CC',
+                    borderColor: '#3B82F6',
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                },
+                {
+                    label: '测试代码',
+                    data: modules.map(m => m.test),
+                    backgroundColor: '#8B5CF6CC',
+                    borderColor: '#8B5CF6',
+                    borderWidth: 1.5,
+                    borderRadius: 6,
+                    borderSkipped: false,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyleWidth: 8,
+                        padding: 16,
+                        color: '#CBD5E1',
+                        font: { size: 12 }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${ctx.raw} 行`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#CBD5E1', font: { size: 11 } }
+                },
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: tickColor, callback: v => v >= 1000 ? (v/1000).toFixed(0) + 'k' : v }
+                }
+            }
+        }
+    });
+
+    // ============================================================
+    // 3. LANGUAGE DISTRIBUTION - Doughnut
+    // ============================================================
+    new Chart(document.getElementById('langChart'), {
+        type: 'doughnut',
+        data: {
+            labels: langData.map(l => l.language),
+            datasets: [{
+                data: langData.map(l => l.lines),
+                backgroundColor: langData.map(l => l.color + 'CC'),
+                borderColor: langData.map(l => l.color),
+                borderWidth: 2,
+                hoverBorderWidth: 3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            cutout: '62%',
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyleWidth: 10,
+                        padding: 20,
+                        color: '#CBD5E1',
+                        font: { size: 12 },
+                        generateLabels: function(chart) {
+                            const data = chart.data;
+                            return data.labels.map((label, i) => ({
+                                text: `${label}  ${data.datasets[0].data[i].toLocaleString()} 行`,
+                                fillStyle: data.datasets[0].backgroundColor[i],
+                                strokeStyle: data.datasets[0].borderColor[i],
+                                lineWidth: 1,
+                                hidden: false,
+                                index: i,
+                                pointStyle: 'circle',
+                                pointStyleWidth: 8,
+                            }));
+                        }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: ctx => {
+                            const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                            const pct = ((ctx.raw / total) * 100).toFixed(1);
+                            return ` ${ctx.label}: ${ctx.raw.toLocaleString()} 行 (${pct}%)`;
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    // ============================================================
+    // 4. GIT TIMELINE - Line Chart
+    // ============================================================
+    const cumulativeLines = [];
+    let cumSum = 0;
+    gitTimeline.forEach(c => { cumSum += c.added - c.deleted; cumulativeLines.push(cumSum); });
+
+    new Chart(document.getElementById('timelineChart'), {
+        type: 'line',
+        data: {
+            labels: gitTimeline.map(c => c.date + '\n' + c.label),
+            datasets: [
+                {
+                    label: '累计代码行数',
+                    data: cumulativeLines,
+                    borderColor: '#06B6D4',
+                    backgroundColor: 'rgba(6, 182, 212, 0.1)',
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.4,
+                    pointBackgroundColor: '#06B6D4',
+                    pointBorderColor: '#0F172A',
+                    pointBorderWidth: 2,
+                    pointRadius: 5,
+                    pointHoverRadius: 7,
+                },
+                {
+                    label: '新增行数',
+                    data: gitTimeline.map(c => c.added),
+                    borderColor: '#10B981',
+                    backgroundColor: 'rgba(16, 185, 129, 0.05)',
+                    borderWidth: 2,
+                    borderDash: [6, 3],
+                    fill: false,
+                    tension: 0.4,
+                    pointBackgroundColor: '#10B981',
+                    pointBorderColor: '#0F172A',
+                    pointBorderWidth: 2,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index',
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        usePointStyle: true,
+                        pointStyleWidth: 8,
+                        padding: 16,
+                        color: '#CBD5E1',
+                        font: { size: 12 }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    padding: 12,
+                    cornerRadius: 8,
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${ctx.raw.toLocaleString()} 行`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#CBD5E1', font: { size: 10 }, maxRotation: 30 }
+                },
+                y: {
+                    grid: { color: gridColor },
+                    ticks: { color: tickColor, callback: v => v >= 1000 ? (v/1000).toFixed(1) + 'k' : v }
+                }
+            }
+        }
+    });
+
+    // ============================================================
+    // 5. TOP FILES TABLE
+    // ============================================================
+    const topFilesBody = document.getElementById('topFilesBody');
+    const typeColors = { Main: 'bg-blue-500/20 text-blue-400', Test: 'bg-purple-500/20 text-purple-400', Resource: 'bg-amber-500/20 text-amber-400' };
+    topFiles.forEach((f, i) => {
+        const pct = ((f.lines / totalLines) * 100).toFixed(1);
+        const row = document.createElement('tr');
+        row.className = 'border-b border-slate-700/30 hover:bg-slate-700/20 transition-colors';
+        row.innerHTML = `
+            <td class="py-2.5 pr-2 font-mono text-xs text-slate-500">${i + 1}</td>
+            <td class="py-2.5 pr-2 font-medium text-slate-200 text-xs max-w-[160px] truncate" title="${f.name}">${f.name}</td>
+            <td class="py-2.5 pr-2"><span class="text-xs px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400">${f.module}</span></td>
+            <td class="py-2.5 pr-2 text-right font-mono text-sm font-semibold text-white">${f.lines.toLocaleString()}</td>
+            <td class="py-2.5 text-right">
+                <span class="text-xs px-2 py-0.5 rounded-full ${typeColors[f.type] || 'bg-slate-500/20 text-slate-400'}">${f.type}</span>
+                <span class="text-xs text-slate-500 ml-1">${pct}%</span>
+            </td>
+        `;
+        topFilesBody.appendChild(row);
+    });
+
+    // ============================================================
+    // 6. MODULE DETAIL SECTION
+    // ============================================================
+    const moduleDetail = document.getElementById('moduleDetail');
+    modules.forEach((m, i) => {
+        const total = m.main + m.test;
+        const barWidth = Math.min(100, (total / 1256) * 100);
+        const color = moduleColors[i % moduleColors.length];
+        const div = document.createElement('div');
+        div.className = 'mb-4 last:mb-0';
+        div.innerHTML = `
+            <div class="flex items-center justify-between mb-1.5">
+                <div class="flex items-center gap-2">
+                    <div class="w-2.5 h-2.5 rounded-full" style="background:${color}"></div>
+                    <span class="text-sm font-semibold text-slate-200">${m.name}</span>
+                    <span class="text-xs text-slate-500">${m.desc}</span>
+                </div>
+                <span class="font-mono text-xs text-slate-400">${total} 行</span>
+            </div>
+            <div class="progress-bar mb-1.5">
+                <div class="progress-fill" style="width:${barWidth}%;background:${color}"></div>
+            </div>
+            <div class="flex flex-wrap gap-1">
+                ${m.files.map(f => `<span class="text-xs px-2 py-0.5 rounded-md bg-slate-700/40 text-slate-400 font-mono">${f}</span>`).join('')}
+            </div>
+        `;
+        moduleDetail.appendChild(div);
+    });
+
+    // ============================================================
+    // ANIMATE PROGRESS BARS ON SCROLL
+    // ============================================================
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.querySelectorAll('.progress-fill').forEach(el => {
+                    const w = el.style.width;
+                    el.style.width = '0%';
+                    requestAnimationFrame(() => { el.style.width = w; });
+                });
+                observer.unobserve(entry.target);
+            }
+        });
+    }, { threshold: 0.2 });
+    document.querySelectorAll('.glass').forEach(el => observer.observe(el));
+    </script>
+</body>
+</html>
